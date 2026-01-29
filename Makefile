@@ -1,5 +1,5 @@
 PACKAGE=vdu
-VERSION=0.1.0
+VERSION := $(shell grep '__version__ = ' vdu.py | cut -d'"' -f2)
 RELEASE=$(PACKAGE)-$(VERSION)
 RELEASE_DIR=$(RELEASE)
 DEBIAN_FILE=./$(RELEASE).deb
@@ -21,7 +21,6 @@ default:
 	@echo "  4. make build"
 	@echo "  5. make install"
 	@echo ""
-# 	@echo "Note: Make sure $(RELEASE_DIR)/debian/ is properly configured!"
 
 env:
 	python -m venv .venv
@@ -30,10 +29,17 @@ env:
 test:
 	pytest
 
-build:
+build: prepare
 	dpkg-deb --build $(RELEASE_DIR)
 
-install:
+prepare:
+	rm -rf $(RELEASE_DIR)
+	mkdir -p $(RELEASE_DIR)/DEBIAN $(RELEASE_DIR)/usr/bin $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
+	sed "s/VERSION/$(VERSION)/g" control > $(RELEASE_DIR)/DEBIAN/control
+	cp vdu $(RELEASE_DIR)/usr/bin/
+	cp vdu.py __init__.py $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
+
+install: build
 	sudo apt install -y $(DEBIAN_FILE)
 
 remove:

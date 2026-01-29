@@ -3,7 +3,9 @@ import os
 import datetime
 import math
 import sys
+import argparse
 from multiprocessing import Pool, cpu_count
+__version__ = "0.1.6"
 
 
 class Vdu:
@@ -33,12 +35,8 @@ class Vdu:
     def __init__(self, video_directory):
         self.video_directory = self.check_path(video_directory)
 
-    def exists_video_files(self):
-        for root, dirs, files in os.walk(self.video_directory):
-            for name in files:
-                if self.is_video_file(name):
-                    return True
-        return False
+    def get_video_directory(self):
+        return self.video_directory
 
     def get_video_files(self, dir):
         video_files = []
@@ -61,17 +59,16 @@ class Vdu:
             files = [os.path.join(dir, f) for f in os.listdir(dir) if os.path.isfile(os.path.join(dir, f)) and self.is_video_file(f)]
         else:
             files = self.get_video_files(self.video_directory+dir)
-
         # Multi process
         with Pool(processes=cpu_count()) as pool:
             sums = pool.map(self.get_duration, files)
         return sum(sums)
         
-    def show_durations(self):
+    def show_durations_summarize(self):
         durations = []
-        main_dirs = next(os.walk(self.video_directory))[1]
         total = 0
 
+        main_dirs = next(os.walk(self.video_directory))[1]
         for dir in main_dirs:
             sum = self.get_directory_duration(dir)
             if sum:
@@ -83,18 +80,55 @@ class Vdu:
         durations.append({"sum": self.seconds_to_human(total), "dir": "Total in "+self.video_directory})
         return durations        
 
+    def show_durations(self, summarize=False):
+        durations = []
+        total = 0
+
+        if summarize:
+            main_dirs = next(os.walk(self.video_directory))[1]
+            for dir in main_dirs:
+                sum = self.get_directory_duration(dir)
+                if sum:
+                    durations.append({"sum": self.seconds_to_human(sum), "dir": self.video_directory+dir})
+                    total += sum
+        else:
+            for root, dirs, files in os.walk(self.video_directory):
+                for dir in dirs:
+                    full_dir = os.path.join(root, dir)
+                    sum = self.get_directory_duration(full_dir, files_only=True)
+                    if sum:
+                        durations.append({"sum": self.seconds_to_human(sum), "dir": full_dir})
+                        total += sum
+
+        sum = self.get_directory_duration(self.video_directory, files_only=True)
+        total += sum
+        durations.append({"sum": self.seconds_to_human(total), "dir": "Total in "+self.video_directory})
+        return durations        
+
+    def exists_video_files(self):
+        for root, dirs, files in os.walk(self.video_directory):
+            if any(self.is_video_file(name) for name in files):
+                return True
+        return False
+
     @staticmethod
     def main(argv=None):
-        if len(sys.argv) < 2:
-            sys.exit("Syntax: " + sys.argv[0] + " <Video Directory>")
-        if not os.path.isdir(sys.argv[1]):
-            sys.exit("No directory " + sys.argv[1])
+        parser = argparse.ArgumentParser(description="Show video files length")      
+        parser.add_argument('dir', type=str, default="./", help='directory (default=./)')
+        parser.add_argument('-v', '--version', '-V', action='version', version=f"%(prog)s {__version__}", help='version')
+        parser.add_argument('-s', '--summarize', action='store_true', help='Summarize')
 
-        vdu = Vdu(sys.argv[1])
+        args = parser.parse_args()
+
+        if not os.path.isdir(args.dir):
+            sys.exit("No directory " + args.dir)
+
+        vdu = Vdu(args.dir)
         if not vdu.exists_video_files():
-            sys.exit("No video files in " + sys.argv[1])
+            sys.exit("No video files in " + vdu.get_video_directory())
         
-        durations = vdu.show_durations()
+        durations = vdu.show_durations(args.summarize)
+        print(durations)
         max_dur_len = max(len(d["sum"]) for d in durations)
         for i, duration in enumerate(durations):
             dir = duration.get("dir")
