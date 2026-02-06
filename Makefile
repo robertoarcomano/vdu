@@ -1,4 +1,5 @@
 PACKAGE=vdu
+PACKAGE_PREFIX=$(PACKAGE)-
 VERSION := $(shell grep '__version__ = ' vdu.py | cut -d'"' -f2)
 RELEASE=$(PACKAGE)-$(VERSION)
 RELEASE_DIR=$(RELEASE)
@@ -8,11 +9,11 @@ default:
 	@echo "=== Instructions for Debian package $(PACKAGE) v$(VERSION) ==="
 	@echo ""
 	@echo "Available commands:"
-	@echo "  make env     - Create .venv and install dependencies (requirements.txt)"
-	@echo "  make test    - Run pytest tests"
-	@echo "  make build   - Build .deb with dpkg-deb --build $(RELEASE_DIR)"
-	@echo "  make install - Install: sudo apt install $(DEBIAN_FILE)"
-	@echo "  make remove  - Remove: sudo apt remove $(PACKAGE)"
+	@echo "  make env       - Create .venv and install dependencies (requirements.txt)"
+	@echo "  make test      - Run pytest tests"
+	@echo "  make build     - Build .deb with dpkg-deb --build $(RELEASE_DIR)"
+	@echo "  make install   - Install: sudo apt install $(DEBIAN_FILE)"
+	@echo "  make uninstall - Uninstall: sudo apt remove $(PACKAGE)"
 	@echo ""
 	@echo "Typical workflow:"
 	@echo "  1. make env"
@@ -33,7 +34,7 @@ build: prepare
 	dpkg-deb --build $(RELEASE_DIR)
 
 prepare:
-	rm -rf $(RELEASE_DIR)
+	rm -rf $(PACKAGE_PREFIX)*
 	mkdir -p $(RELEASE_DIR)/DEBIAN $(RELEASE_DIR)/usr/bin $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
 	sed "s/VERSION/$(VERSION)/g" control > $(RELEASE_DIR)/DEBIAN/control
 	cp vdu $(RELEASE_DIR)/usr/bin/
@@ -42,5 +43,5 @@ prepare:
 install: build
 	sudo apt install -y $(DEBIAN_FILE)
 
-remove:
+uninstall:
 	sudo apt remove -y $(PACKAGE)
