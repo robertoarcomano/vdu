@@ -15,7 +15,7 @@ import (
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
-const __version__ string = "0.2.0"
+const __version__ string = "0.2.1"
 const __video_extensions__ string = "mp4,mkv,avi,mov,flv,wmv,webm,m4v"
 
 type dir_size struct {
@@ -229,7 +229,6 @@ func main() {
 	dir, summarize, sort, reverse := get_args()
 	vdu := NewVdu(dir)
 	durations, max_duration_size_len, max_durations_dir_len := vdu.get_durations(summarize, sort, reverse)
-	fmt.Println(durations)
 	for i, item := range durations {
 		fmt.Printf("%*s %s\n", max_duration_size_len, vdu.seconds_to_human(item.size), item.dir)
 		if i == len(durations)-2 {

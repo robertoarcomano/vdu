@@ -6,7 +6,7 @@ import sys
 import argparse
 from operator import itemgetter
 from multiprocessing import Pool, cpu_count
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 class Vdu:
