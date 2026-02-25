@@ -23,11 +23,6 @@ type dir_size struct {
 	size float64
 }
 
-type probeData struct {
-	Format struct {
-		Duration string `json:"duration"`
-	} `json:"format"`
-}
 type Vdu struct {
 	file_formats    string
 	video_directory string
@@ -79,34 +74,39 @@ func (vdu Vdu) get_video_files(dir string) []string {
 	return video_files
 }
 
-func (vdu Vdu) getVideoDurationSeconds(filePath string) float64 {
+func (vdu Vdu) getVideoDurationSeconds(filePath string, finished chan float64) {
+	type probeData struct {
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
+	}
 	var data probeData
 	raw, _ := ffmpeg.Probe(filePath)
 	json.Unmarshal([]byte(raw), &data)
 	duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
-	return duration
+	finished <- duration
 }
 
 func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
 	size := 0.0
+	files := []string{}
 	if files_only {
-		files, _ := os.ReadDir(dir)
-		for _, file := range files {
+		file_list, _ := os.ReadDir(dir)
+		for _, file := range file_list {
 			if file.IsDir() == false && vdu.is_video_file(file.Name()) {
 				fileName := filepath.Join(dir, file.Name())
-				sub := vdu.getVideoDurationSeconds(fileName)
-				size = size + sub
+				files = append(files, fileName)
 			}
 		}
 	} else {
-		files := vdu.get_video_files(dir)
-		for _, file := range files {
-			sub := vdu.getVideoDurationSeconds(file)
-			size = size + sub
-		}
-		// Multi process
-		// with Pool(processes=cpu_count()) as pool:
-		// sums = pool.map(self.get_duration, files)
+		files = vdu.get_video_files(dir)
+	}
+	finished := make(chan float64, len(files))
+	for _, file := range files {
+		go vdu.getVideoDurationSeconds(file, finished)
+	}
+	for range files {
+		size = size + <-finished
 	}
 	return size
 }
@@ -124,8 +124,6 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 			full_directory_name := filepath.Join(vdu.video_directory, dir.Name())
 			sum := vdu.get_directory_duration(full_directory_name, false)
 			total += sum
-			isSorted = isSorted
-			isReversed = isReversed
 			durations = append(durations, dir_size{
 				dir:  filepath.Join(vdu.video_directory, dir.Name()),
 				size: sum,
@@ -145,8 +143,6 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 			}
 			return nil
 		})
-		isSorted = isSorted
-		isReversed = isReversed
 	}
 
 	if isSorted {
