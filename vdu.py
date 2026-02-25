@@ -65,7 +65,7 @@ class Vdu:
             sums = pool.map(self.get_duration, files)
         return sum(sums)
         
-    def get_durations(self, isSummarized, isSorted, isReversed):
+    def get_durations(self, isSummarized=False, isSorted=False, isReversed=False):
         durations = []
         total = 0
 

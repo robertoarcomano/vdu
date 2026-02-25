@@ -229,7 +229,7 @@ func main() {
 	dir, summarize, sort, reverse := get_args()
 	vdu := NewVdu(dir)
 	durations, max_duration_size_len, max_durations_dir_len := vdu.get_durations(summarize, sort, reverse)
-
+	fmt.Println(durations)
 	for i, item := range durations {
 		fmt.Printf("%*s %s\n", max_duration_size_len, vdu.seconds_to_human(item.size), item.dir)
 		if i == len(durations)-2 {

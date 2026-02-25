@@ -1,0 +1,9 @@
+Package: vdu
+Version: VERSION
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Roberto Arcomano <info@robertoarcomano.com>
+Description: Video Disk Usage - du for video duration
+ A small command line utility to show total video durations in directories.
+

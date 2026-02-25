@@ -22,23 +22,55 @@ default:
 	@echo "  4. make build"
 	@echo "  5. make install"
 	@echo ""
+	@echo "Parameters:"
+	@echo "  LANG=<python|go(default)>"
+	@echo ""
 
 env:
 	python -m venv .venv
 	. .venv/bin/activate &&	pip install -r requirements.txt
 
-test:
-	pytest
+test: 
+ifeq ($(LANG),python)
+	$(MAKE) test-python
+else
+	$(MAKE) test-go
+endif
+
+compile:
+	@cd go && go build
+
+test-go: compile
+	@echo "Running tests..."
+	@mkdir -p ~/tmp
+	cd go && TMPDIR=~/tmp go test
+	
+test-python: env
+	@echo "Running tests..."
+	. .venv/bin/activate && pytest
+
+prepare: 
+ifeq ($(LANG),python)
+	$(MAKE) prepare-python
+else
+	$(MAKE) prepare-go
+endif
+
+prepare-python: test-python
+	rm -rf $(PACKAGE_PREFIX)*
+	mkdir -p $(RELEASE_DIR)/DEBIAN $(RELEASE_DIR)/usr/bin $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
+	sed "s/VERSION/$(VERSION)/g" control.python > $(RELEASE_DIR)/DEBIAN/control
+	cp vdu $(RELEASE_DIR)/usr/bin/
+	cp vdu.py __init__.py $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
+
+prepare-go: test-go
+	rm -rf $(PACKAGE_PREFIX)*
+	mkdir -p $(RELEASE_DIR)/DEBIAN $(RELEASE_DIR)/usr/bin
+	sed "s/VERSION/$(VERSION)/g" control.go > $(RELEASE_DIR)/DEBIAN/control
+	cp go/vdu $(RELEASE_DIR)/usr/bin/
 
 build: prepare
 	dpkg-deb --build $(RELEASE_DIR)
-
-prepare:
-	rm -rf $(PACKAGE_PREFIX)*
-	mkdir -p $(RELEASE_DIR)/DEBIAN $(RELEASE_DIR)/usr/bin $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
-	sed "s/VERSION/$(VERSION)/g" control > $(RELEASE_DIR)/DEBIAN/control
-	cp vdu $(RELEASE_DIR)/usr/bin/
-	cp vdu.py __init__.py $(RELEASE_DIR)/usr/lib/python3/dist-packages/vdu
 
 install: build
 	sudo apt install -y $(DEBIAN_FILE)
