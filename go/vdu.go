@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -71,12 +71,6 @@ func (vdu Vdu) seconds_to_human(seconds float64) string {
 func (vdu Vdu) get_video_files(dir string) []string {
 	video_files := []string{}
 	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		// if err != nil {
-		// 	return err
-		// }
-		// if d.IsDir() {
-		// 	return nil
-		// }
 		if vdu.is_video_file(d.Name()) {
 			video_files = append(video_files, path)
 		}
@@ -84,58 +78,37 @@ func (vdu Vdu) get_video_files(dir string) []string {
 	})
 	return video_files
 }
-func (vdu Vdu) getVideoDurationSeconds(filePath string) (float64, error) {
-	if filePath == "" {
-		return 0, errors.New("filePath is empty")
-	}
 
-	raw, err := ffmpeg.Probe(filePath)
-	if err != nil {
-		return 0, err
-	}
-
+func (vdu Vdu) getVideoDurationSeconds(filePath string) float64 {
 	var data probeData
-	if err := json.Unmarshal([]byte(raw), &data); err != nil {
-		return 0, err
-	}
-
-	if data.Format.Duration == "" {
-		return 0, errors.New("duration not found in metadata")
-	}
-
-	duration, err := strconv.ParseFloat(data.Format.Duration, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return duration, nil
+	raw, _ := ffmpeg.Probe(filePath)
+	json.Unmarshal([]byte(raw), &data)
+	duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
+	return duration
 }
 
 func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
 	size := 0.0
 	if files_only {
-		files, _ := os.ReadDir(vdu.video_directory)
+		files, _ := os.ReadDir(dir)
 		for _, file := range files {
 			if file.IsDir() == false && vdu.is_video_file(file.Name()) {
-				sub, err := vdu.getVideoDurationSeconds(file.Name())
+				fileName := filepath.Join(dir, file.Name())
+				sub := vdu.getVideoDurationSeconds(fileName)
 				size = size + sub
-				err = err
 			}
 		}
 	} else {
 		files := vdu.get_video_files(dir)
 		for _, file := range files {
-			sub, err := vdu.getVideoDurationSeconds(file)
+			sub := vdu.getVideoDurationSeconds(file)
 			size = size + sub
-			err = err
-			// fmt.Println(file, sub)
 		}
 		// Multi process
 		// with Pool(processes=cpu_count()) as pool:
 		// sums = pool.map(self.get_duration, files)
 	}
 	return size
-	// return sum(sums)
 }
 
 func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool) ([]dir_size, int, int) {
@@ -148,20 +121,20 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 			if dir.IsDir() == false {
 				continue
 			}
-			directory_name := dir.Name()
-			sum := vdu.get_directory_duration(directory_name, false)
+			full_directory_name := filepath.Join(vdu.video_directory, dir.Name())
+			sum := vdu.get_directory_duration(full_directory_name, false)
 			total += sum
 			isSorted = isSorted
 			isReversed = isReversed
 			durations = append(durations, dir_size{
-				dir:  filepath.Join(vdu.video_directory, directory_name),
+				dir:  filepath.Join(vdu.video_directory, dir.Name()),
 				size: sum,
 			})
 		}
 	} else {
 		filepath.WalkDir(vdu.video_directory, func(path string, d fs.DirEntry, err error) error {
-			if d.IsDir() && d.Name() != vdu.video_directory {
-				sum := vdu.get_directory_duration(path, false)
+			if d.IsDir() && path != vdu.video_directory {
+				sum := vdu.get_directory_duration(path, true)
 				if sum > 0 {
 					durations = append(durations, dir_size{
 						dir:  path,
@@ -175,32 +148,19 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 		isSorted = isSorted
 		isReversed = isReversed
 	}
+
+	if isSorted {
+		sort.Slice(durations, func(i, j int) bool {
+			return (durations[i].size < durations[j].size) != isReversed
+		})
+	}
+
 	sum := vdu.get_directory_duration(vdu.video_directory, true)
 	total += sum
 	durations = append(durations, dir_size{
 		dir:  "Total in " + vdu.video_directory,
 		size: total,
 	})
-
-	// if isSorted:
-	// durations.sort(key=itemgetter("sum"), reverse=isReversed)
-
-	// durations = durations.append({"sum": total, "dir": "Total in "+self.video_directory})
-	// return durations
-
-	// filepath.WalkDir(vdu.dir, func(path string, d fs.DirEntry, err error) error {
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	info, _ := d.Info()
-	// 	if !info.IsDir() && vdu.is_video_file(path) {
-	// 		duration, err := GetVideoDurationSeconds(path)
-	// 		if err == nil {
-	// 			fmt.Println(path, duration)
-	// 		}
-	// 	}
-	// 	return nil
-	// })
 	return durations, vdu.get_max_duration_size_len(durations), vdu.get_max_durations_dir_len(durations)
 }
 
