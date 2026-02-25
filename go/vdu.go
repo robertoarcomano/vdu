@@ -70,8 +70,7 @@ func (vdu Vdu) seconds_to_human(seconds float64) string {
 }
 func (vdu Vdu) get_video_files(dir string) []string {
 	video_files := []string{}
-	fullPath := filepath.Join(vdu.video_directory, dir)
-	filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, err error) error {
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		// if err != nil {
 		// 	return err
 		// }
@@ -113,12 +112,16 @@ func (vdu Vdu) getVideoDurationSeconds(filePath string) (float64, error) {
 }
 
 func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
-	// files := []string{}
 	size := 0.0
 	if files_only {
 		files, _ := os.ReadDir(vdu.video_directory)
-		// fmt.Println(files)
-		files = files
+		for _, file := range files {
+			if file.IsDir() == false && vdu.is_video_file(file.Name()) {
+				sub, err := vdu.getVideoDurationSeconds(file.Name())
+				size = size + sub
+				err = err
+			}
+		}
 	} else {
 		files := vdu.get_video_files(dir)
 		for _, file := range files {
@@ -135,46 +138,49 @@ func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
 	// return sum(sums)
 }
 
-func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool) ([]dir_size, int) {
+func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool) ([]dir_size, int, int) {
 	durations := []dir_size{}
-	// total := 0
+	total := 0.0
 
 	if isSummarized {
 		main_dirs, _ := os.ReadDir(vdu.video_directory)
 		for _, dir := range main_dirs {
-			if dir.IsDir() == false && !vdu.is_video_file(dir.Name()) {
+			if dir.IsDir() == false {
 				continue
 			}
 			directory_name := dir.Name()
 			sum := vdu.get_directory_duration(directory_name, false)
-			// if sum > 0 {
-			// 	elem := map[string]interface{}{
-			// 		"sum": total,
-			// 		"dir": "Total in " + vdu.video_directory,
-			// 	}
-			// 	durations = append(durations, elem)
-			// 	total += sum
-			// }
+			total += sum
 			isSorted = isSorted
 			isReversed = isReversed
-			fmt.Println(vdu.seconds_to_human(sum), directory_name)
 			durations = append(durations, dir_size{
-				dir:  directory_name,
+				dir:  filepath.Join(vdu.video_directory, directory_name),
 				size: sum,
 			})
 		}
-	} // else {
-	// 	for root, dirs, files in os.walk(self.video_directory):
-	// 	filepath.WalkDir(vdu.dir, func(path string, d fs.DirEntry, err error) error {
-	// 		for dir in dirs:
-	// 			full_dir = os.path.join(root, dir)
-	// 			sum = self.get_directory_duration(full_dir, files_only=True)
-	// 			if sum:
-	// 				durations.append({"sum": sum, "dir": full_dir})
-	// 				total += sum
-	// }
-	// sum = self.get_directory_duration(vdu.video_directory, files_only=True)
-	// total += sum
+	} else {
+		filepath.WalkDir(vdu.video_directory, func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() && d.Name() != vdu.video_directory {
+				sum := vdu.get_directory_duration(path, false)
+				if sum > 0 {
+					durations = append(durations, dir_size{
+						dir:  path,
+						size: sum,
+					})
+					total += sum
+				}
+			}
+			return nil
+		})
+		isSorted = isSorted
+		isReversed = isReversed
+	}
+	sum := vdu.get_directory_duration(vdu.video_directory, true)
+	total += sum
+	durations = append(durations, dir_size{
+		dir:  "Total in " + vdu.video_directory,
+		size: total,
+	})
 
 	// if isSorted:
 	// durations.sort(key=itemgetter("sum"), reverse=isReversed)
@@ -195,7 +201,7 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 	// 	}
 	// 	return nil
 	// })
-	return durations, vdu.get_max_duration_len(durations)
+	return durations, vdu.get_max_duration_size_len(durations), vdu.get_max_durations_dir_len(durations)
 }
 
 func get_args() (string, bool, bool, bool) {
@@ -243,22 +249,35 @@ func get_args() (string, bool, bool, bool) {
 	return dir, summarize, sort, reverse
 }
 
-func (vdu Vdu) get_max_duration_len(durations []dir_size) int {
-	max_sum_duration_len := 0
+func (vdu Vdu) get_max_durations_dir_len(durations []dir_size) int {
+	max_durations_dir_len := 0
 	for _, duration := range durations {
-		if len(vdu.seconds_to_human(duration.size)) > max_sum_duration_len {
-			max_sum_duration_len = len(vdu.seconds_to_human(duration.size))
+		if len(duration.dir) > max_durations_dir_len {
+			max_durations_dir_len = len(duration.dir)
 		}
 	}
-	return max_sum_duration_len
+	return max_durations_dir_len
+}
+
+func (vdu Vdu) get_max_duration_size_len(durations []dir_size) int {
+	max_duration_size_len := 0
+	for _, duration := range durations {
+		if len(vdu.seconds_to_human(duration.size)) > max_duration_size_len {
+			max_duration_size_len = len(vdu.seconds_to_human(duration.size))
+		}
+	}
+	return max_duration_size_len
 }
 
 func main() {
 	dir, summarize, sort, reverse := get_args()
 	vdu := NewVdu(dir)
-	durations, max_sum_duration_len := vdu.get_durations(summarize, sort, reverse)
+	durations, max_duration_size_len, max_durations_dir_len := vdu.get_durations(summarize, sort, reverse)
 
-	for _, item := range durations {
-		fmt.Printf("%*s %s\n", max_sum_duration_len, vdu.seconds_to_human(item.size), item.dir)
+	for i, item := range durations {
+		fmt.Printf("%*s %s\n", max_duration_size_len, vdu.seconds_to_human(item.size), item.dir)
+		if i == len(durations)-2 {
+			fmt.Println(strings.Repeat("-", max_duration_size_len+max_durations_dir_len+1))
+		}
 	}
 }

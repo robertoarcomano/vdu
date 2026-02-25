@@ -12,8 +12,7 @@
             "program": "${fileDirname}",
             "env": {},
             "args": [
-                "-s",
-                "../video_test/"
+                "../video_test"
             ]
         }
     ]
