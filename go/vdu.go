@@ -35,7 +35,7 @@ func NewVdu(video_directory string) *Vdu {
 	}
 }
 
-func get_extension(filename string) string {
+func (vdu Vdu) get_extension(filename string) string {
 	dot_position := strings.LastIndex(filename, ".")
 	if dot_position != -1 {
 		return filename[dot_position+1:]
@@ -44,11 +44,11 @@ func get_extension(filename string) string {
 }
 
 func (vdu Vdu) is_video_file(filename string) bool {
-	extension := get_extension(filename)
+	extension := vdu.get_extension(filename)
 	if extension == "" {
 		return false
 	}
-	return strings.Contains(vdu.file_formats, get_extension(filename))
+	return strings.Contains(vdu.file_formats, vdu.get_extension(filename))
 }
 func (vdu Vdu) seconds_to_human(seconds float64) string {
 	secondsInt := int(math.Round(seconds))
@@ -62,18 +62,6 @@ func (vdu Vdu) seconds_to_human(seconds float64) string {
 	s := secondsInt
 
 	return fmt.Sprintf("%dh %02dm %02ds", h, m, s)
-}
-func (vdu Vdu) get_duration(filePath string, finished chan float64) {
-	type probeData struct {
-		Format struct {
-			Duration string `json:"duration"`
-		} `json:"format"`
-	}
-	var data probeData
-	raw, _ := ffmpeg.Probe(filePath)
-	json.Unmarshal([]byte(raw), &data)
-	duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
-	finished <- duration
 }
 
 func (vdu Vdu) get_video_files(dir string, files_only bool) []string {
@@ -98,10 +86,22 @@ func (vdu Vdu) get_video_files(dir string, files_only bool) []string {
 	return video_files
 }
 
+func (vdu Vdu) get_duration(filePath string, finished chan float64) {
+	type probeData struct {
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
+	}
+	var data probeData
+	raw, _ := ffmpeg.Probe(filePath)
+	json.Unmarshal([]byte(raw), &data)
+	duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
+	finished <- duration
+}
+
 func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
 	size := 0.0
-	files := []string{}
-	files = vdu.get_video_files(dir, files_only)
+	files := vdu.get_video_files(dir, files_only)
 	finished := make(chan float64, len(files))
 	for _, file := range files {
 		go vdu.get_duration(file, finished)
