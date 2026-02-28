@@ -8,9 +8,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
@@ -26,6 +28,9 @@ type dir_size struct {
 type Vdu struct {
 	file_formats    string
 	video_directory string
+	filesQ          chan string
+	finished        chan float64
+	workersWaiting  sync.WaitGroup
 }
 
 func NewVdu(video_directory string) *Vdu {
@@ -35,7 +40,24 @@ func NewVdu(video_directory string) *Vdu {
 	}
 }
 
-func (vdu Vdu) get_extension(filename string) string {
+func (vdu *Vdu) get_num_files() int {
+	// get number of files in directory and subdirectories
+	count := 0
+	filepath.WalkDir(vdu.video_directory, func(path string, d fs.DirEntry, err error) error {
+		if !d.IsDir() && vdu.is_video_file(d.Name()) {
+			count++
+		}
+		return nil
+	})
+	return count
+}
+
+func (vdu *Vdu) postInitialize() {
+	vdu.filesQ = make(chan string, vdu.get_num_files())
+	vdu.finished = make(chan float64, vdu.get_num_files())
+}
+
+func (vdu *Vdu) get_extension(filename string) string {
 	dot_position := strings.LastIndex(filename, ".")
 	if dot_position != -1 {
 		return filename[dot_position+1:]
@@ -43,14 +65,14 @@ func (vdu Vdu) get_extension(filename string) string {
 	return ""
 }
 
-func (vdu Vdu) is_video_file(filename string) bool {
+func (vdu *Vdu) is_video_file(filename string) bool {
 	extension := vdu.get_extension(filename)
 	if extension == "" {
 		return false
 	}
 	return strings.Contains(vdu.file_formats, vdu.get_extension(filename))
 }
-func (vdu Vdu) seconds_to_human(seconds float64) string {
+func (vdu *Vdu) seconds_to_human(seconds float64) string {
 	secondsInt := int(math.Round(seconds))
 
 	h := secondsInt / 3600
@@ -64,7 +86,7 @@ func (vdu Vdu) seconds_to_human(seconds float64) string {
 	return fmt.Sprintf("%dh %02dm %02ds", h, m, s)
 }
 
-func (vdu Vdu) get_video_files(dir string, files_only bool) []string {
+func (vdu *Vdu) get_video_files(dir string, files_only bool) []string {
 	video_files := []string{}
 	if files_only {
 		file_list, _ := os.ReadDir(dir)
@@ -86,33 +108,7 @@ func (vdu Vdu) get_video_files(dir string, files_only bool) []string {
 	return video_files
 }
 
-func (vdu Vdu) get_duration(filePath string, finished chan float64) {
-	type probeData struct {
-		Format struct {
-			Duration string `json:"duration"`
-		} `json:"format"`
-	}
-	var data probeData
-	raw, _ := ffmpeg.Probe(filePath)
-	json.Unmarshal([]byte(raw), &data)
-	duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
-	finished <- duration
-}
-
-func (vdu Vdu) get_directory_duration(dir string, files_only bool) float64 {
-	size := 0.0
-	files := vdu.get_video_files(dir, files_only)
-	finished := make(chan float64, len(files))
-	for _, file := range files {
-		go vdu.get_duration(file, finished)
-	}
-	for range files {
-		size = size + <-finished
-	}
-	return size
-}
-
-func (vdu Vdu) get_max_durations_dir_len(durations []dir_size) int {
+func (vdu *Vdu) get_max_durations_dir_len(durations []dir_size) int {
 	max_durations_dir_len := 0
 	for _, duration := range durations {
 		if len(duration.dir) > max_durations_dir_len {
@@ -122,7 +118,7 @@ func (vdu Vdu) get_max_durations_dir_len(durations []dir_size) int {
 	return max_durations_dir_len
 }
 
-func (vdu Vdu) get_max_duration_size_len(durations []dir_size) int {
+func (vdu *Vdu) get_max_duration_size_len(durations []dir_size) int {
 	max_duration_size_len := 0
 	for _, duration := range durations {
 		if len(vdu.seconds_to_human(duration.size)) > max_duration_size_len {
@@ -132,10 +128,57 @@ func (vdu Vdu) get_max_duration_size_len(durations []dir_size) int {
 	return max_duration_size_len
 }
 
+func (vdu *Vdu) get_duration() {
+	type probeData struct {
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
+	}
+	defer vdu.workersWaiting.Done()
+	var data probeData
+	for file := range vdu.filesQ {
+		raw, _ := ffmpeg.Probe(file)
+		json.Unmarshal([]byte(raw), &data)
+		duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
+		vdu.finished <- duration
+	}
+}
+
+func (vdu *Vdu) get_directory_duration(dir string, files_only bool) float64 {
+	size := 0.0
+	files := vdu.get_video_files(dir, files_only)
+
+	for _, file := range files {
+		vdu.filesQ <- file
+	}
+	for range files {
+		size = size + <-vdu.finished
+	}
+	return size
+}
+
 func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool) ([]dir_size, int, int) {
+	get_duration := func() {
+		type probeData struct {
+			Format struct {
+				Duration string `json:"duration"`
+			} `json:"format"`
+		}
+		defer vdu.workersWaiting.Done()
+		var data probeData
+		for file := range vdu.filesQ {
+			raw, _ := ffmpeg.Probe(file)
+			json.Unmarshal([]byte(raw), &data)
+			duration, _ := strconv.ParseFloat(data.Format.Duration, 64)
+			vdu.finished <- duration
+		}
+	}
 	durations := []dir_size{}
 	total := 0.0
-
+	for w := 0; w < runtime.NumCPU(); w++ {
+		vdu.workersWaiting.Add(1)
+		go get_duration()
+	}
 	if isSummarized {
 		main_dirs, _ := os.ReadDir(vdu.video_directory)
 		for _, dir := range main_dirs {
@@ -173,6 +216,8 @@ func (vdu *Vdu) get_durations(isSummarized bool, isSorted bool, isReversed bool)
 	}
 
 	sum := vdu.get_directory_duration(vdu.video_directory, true)
+	close(vdu.filesQ)
+	vdu.workersWaiting.Wait()
 	total += sum
 	durations = append(durations, dir_size{
 		dir:  "Total in " + vdu.video_directory,
@@ -229,6 +274,8 @@ func get_args() (string, bool, bool, bool) {
 func main() {
 	dir, summarize, sort, reverse := get_args()
 	vdu := NewVdu(dir)
+	fmt.Println(vdu.get_num_files())
+	vdu.postInitialize()
 	durations, max_duration_size_len, max_durations_dir_len := vdu.get_durations(summarize, sort, reverse)
 	for i, item := range durations {
 		fmt.Printf("%*s %s\n", max_duration_size_len, vdu.seconds_to_human(item.size), item.dir)
